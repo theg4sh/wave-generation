@@ -1,16 +1,9 @@
 # Required libopenal-dev libalut-dev
 
-OPENAL_PATH?=
+USE_OPENAL?=
 
 INCLUDES := -I./include
-ifneq ($(OPENAL_PATH),)
-INCLUDES += -I$(OPENAL_PATH)/include
-LIBRARIES = -L$(OPENAL_PATH)/build
-else
-$(error "OPENAL_PATH is not set")
-endif
-
-LIBRARIES += -lopenal -lalut -lpthread
+LIBRARIES += -lpthread
 LIBRARIES += -lboost_system -lboost_program_options -lboost_filesystem
 CXX_FLAGS += -Wall -std=c++14 -g $(INCLUDES)
 CXX = g++ $(CXX_FLAGS)
@@ -22,26 +15,37 @@ SOURCES := $(addprefix src/altoolset/, \
 			generators/sin_generator.o \
 			generators/floating_sin_generator.o)
 
+TARGETS = 
+
+ifneq ($(USE_OPENAL),)
+OPENAL_PATH?=
+
 ifneq ($(OPENAL_PATH),)
+INCLUDES += -I$(OPENAL_PATH)/include
+LIBRARIES += -L$(OPENAL_PATH)/build -lopenal -lalut
+
 OPENAL_SOURCES := $(addprefix src/altoolset/openal/, \
 			wav_player.o \
 			queue_player.o \
 			context.o \
-			device.o)
+			device.o \
+			main.o)
 
-SOURCES := $(SOURCES) $(OPENAL_SOURCES)
+TARGETS += openal-simple
 endif
 
-SOURCES += main.o
+endif
 
 .PHONY=show-sources all clean
 
-all: $(SOURCES)
-	$(CXX) -o openal-simple $^ $(LIBRARIES)
+all: $(TARGETS)
+
+openal-simple: $(SOURCES) $(OPENAL_SOURCES)
+	$(CXX) -o $@ $^ $(LIBRARIES)
 
 clean:
 	find ./src -iname "*.o" -exec rm {} \;
-	rm -f ./openal-simple
+	rm -f $(TARGETS)
 
 show-sources:
 	@echo $(CXX_FLAGS)
