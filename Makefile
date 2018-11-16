@@ -2,13 +2,13 @@
 
 
 #OPENAL_PATH?=
-OPENAL_PATH?=$(HOME)/repos/theg4sh/openal-soft
+OPENAL_PATH?=
 
+INCLUDES := -I./include
 ifneq ($(OPENAL_PATH),)
-INCLUDES = -I./include -I$(OPENAL_PATH)/include
+INCLUDES += -I$(OPENAL_PATH)/include
 LIBRARIES = -L$(OPENAL_PATH)/build
 else
-INCLUDES = -I./include
 endif
 
 LIBRARIES += -lopenal -lalut -lpthread
