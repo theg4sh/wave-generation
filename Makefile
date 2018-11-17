@@ -1,56 +1,59 @@
 # Required libopenal-dev libalut-dev
 
 USE_OPENAL?=
+OPENAL_PATH?=
+
+USE_MINIAL?=
+MINIAL_PATH?=
 
 INCLUDES := -I./include
 LIBRARIES += -lpthread
 LIBRARIES += -lboost_system -lboost_program_options -lboost_filesystem
-CXX_FLAGS += -Wall -std=c++14 -g $(INCLUDES)
+CXX_FLAGS += -Wall -pedantic -std=c++14 -ggdb $(INCLUDES)
 CXX = g++ $(CXX_FLAGS)
 
 # src/altoolset files
 SOURCES := $(addprefix src/altoolset/, \
 			generator.o \
+			generator_buffer.o \
 			generators/silence_generator.o \
 			generators/sin_generator.o \
 			generators/floating_sin_generator.o)
 
+TESTS := $(addprefix tests/, \
+			test_generator_buffer.o)
+
 TARGETS = 
 
 ifneq ($(USE_OPENAL),)
-OPENAL_PATH?=
-
-ifneq ($(OPENAL_PATH),)
-INCLUDES += -I$(OPENAL_PATH)/include
-LIBRARIES += -L$(OPENAL_PATH)/build -lopenal -lalut
-
-OPENAL_SOURCES := $(addprefix src/altoolset/openal/, \
-			wav_player.o \
-			queue_player.o \
-			context.o \
-			device.o \
-			main.o)
-
-TARGETS += openal-simple
+include mk/openal.mk
 endif
 
+ifneq ($(USE_MINIAL),)
+include mk/mini_al.mk
 endif
 
-.PHONY=show-sources all clean
+.PHONY=show-sources all clean test
 
 all: $(TARGETS)
 
 openal-simple: $(SOURCES) $(OPENAL_SOURCES)
 	$(CXX) -o $@ $^ $(LIBRARIES)
 
+minial-simple: $(SOURCES) $(MINIAL_SOURCES)
+	$(CXX) -o $@ $^ $(LIBRARIES)
+
 clean:
-	find ./src -iname "*.o" -exec rm {} \;
-	rm -f $(TARGETS)
+	find ./src ./tests -iname "*.o" -exec rm {} \;
+	rm -f $(TARGETS) ./test
 
 show-sources:
 	@echo $(CXX_FLAGS)
 	@echo $(OPENAL_SOURCES)
 	@echo $(SOURCES)
+
+test: src/altoolset/generator_buffer.o $(TESTS)
+	$(CXX) -o $@ $^ $(LIBRARIES)
 
 %.o: %.cpp
 	$(CXX) -c -o $@ $^ $(LIBRARIES)
