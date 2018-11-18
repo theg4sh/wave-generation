@@ -2,20 +2,26 @@
 #include <stack>
 #include <vector>
 #include <thread>
-#include <AL/al.h>
-#include <AL/alc.h>
 
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 #include <boost/algorithm/string.hpp>
 
-#include "altoolset/openal/context.hpp"
-#include "altoolset/openal/device.hpp"
+#define MINI_AL_IMPLEMENTATION
+#include "mini_al.h"
+
+#define DEVICE_FORMAT       mal_format_f32
+#define DEVICE_CHANNELS     1
+//#define DEVICE_SAMPLE_RATE  48000
+#define DEVICE_SAMPLE_RATE  44100
+
+//#include "altoolset/altoolset.hpp"
 #include "altoolset/generators/sin_generator.hpp"
 #include "altoolset/generators/floating_sin_generator.hpp"
 
 namespace po=boost::program_options;
 
+/*
 void WavPlay(std::shared_ptr<altoolset::openal::Context> ctx, size_t count, const char* filename)
 {
     std::stack<std::weak_ptr<altoolset::Player>> keeper;
@@ -34,34 +40,94 @@ void WavPlay(std::shared_ptr<altoolset::openal::Context> ctx, size_t count, cons
         std::cerr << "Done" << std::endl;
     }
 }
+*/
 
-void QueueFloatingPlay(altoolset::openal::Device& dev, ALCint freqMin, ALCint freqMax, ALfloat period, std::chrono::milliseconds time, std::shared_ptr<altoolset::openal::Context> ctx)
+auto lastTick = std::chrono::high_resolution_clock::now();
+
+// This is the function that's used for sending more data to the device for playback.
+// NOTE: avg call each 12ms
+mal_uint32 on_send_frames_to_device(mal_device* pDevice, mal_uint32 frameCount, void* pSamples)
 {
-    const auto deviceRate = dev.getDeviceRate();
-    std::cout << "Creating frequency wave..." << std::endl;
-    altoolset::SinGenerator frequencyWave(period, deviceRate);
-    frequencyWave.init();
+    mal_assert(pDevice->channels == DEVICE_CHANNELS);
 
-    std::cout << "Creating floating sin generator " << freqMin << "<->" << freqMax << " ..." << std::endl;
-    altoolset::FloatingSinGenerator generator(freqMin, freqMax, &frequencyWave, deviceRate);
-    generator.init();
-    std::cout << "Creating queue player..." << std::endl;
-    auto player = ctx->createQueuePlayer(generator);
-    std::cout << "Playing..." << std::endl;
-    player->play();
-    std::this_thread::sleep_for(time);
-    player->stop();
+    altoolset::Generator* pSineGen = static_cast<altoolset::Generator*>(pDevice->pUserData);
+    mal_assert(pSineGen != nullptr);
+
+    pSineGen->fillOutputBuffer(static_cast<float*>(pSamples), frameCount);
+    pSineGen->generate(1.0f);
+
+    return frameCount;
+    // see original code in mal_uint64 mal_sine_wave_read_ex
+    //return mal_sine_wave_read(pSineWave, frameCount, (float*)pSamples);
 }
 
-void QueueSinPlay(altoolset::openal::Device& dev, ALCint frequency, std::chrono::milliseconds time, std::shared_ptr<altoolset::openal::Context> ctx)
+int QueueSinPlay(ALCint frequency, std::chrono::milliseconds time)
 {
-    altoolset::SinGenerator generator(frequency, dev.getDeviceRate());
+    altoolset::SinGenerator generator(frequency, DEVICE_SAMPLE_RATE);
     generator.init();
+    generator.generate(1.0f); // prefill which takes -gt 12ms for on_send_frames_to_device
 
-    auto player = ctx->createQueuePlayer(generator);
-    player->play();
-    std::this_thread::sleep_for(time);
-    player->stop();
+    lastTick = std::chrono::high_resolution_clock::now();
+    
+    mal_device_config config = mal_device_config_init_playback(DEVICE_FORMAT, DEVICE_CHANNELS, DEVICE_SAMPLE_RATE, on_send_frames_to_device);
+    mal_device device;
+    if (mal_device_init(NULL, mal_device_type_playback, NULL, &config, &generator, &device) != MAL_SUCCESS) {
+        printf("Failed to open playback device.\n");
+        return -4;
+    }
+
+    printf("Device Name: %s\n", device.name);
+
+    if (mal_device_start(&device) != MAL_SUCCESS) {
+        printf("Failed to start playback device.\n");
+        mal_device_uninit(&device);
+        return -5;
+    }
+    
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(main_loop__em, 0, 1);
+#else
+    printf("Press Enter to quit...\n");
+    getchar();
+#endif
+    
+    mal_device_uninit(&device);
+    return 0;
+}
+
+int QueueFloatingPlay(ALCint freqMin, ALCint freqMax, ALfloat period, std::chrono::milliseconds time)
+{
+    altoolset::SinGenerator frequencyWave(period, DEVICE_SAMPLE_RATE);
+    frequencyWave.init();
+    altoolset::FloatingSinGenerator generator(freqMin, freqMax, &frequencyWave, DEVICE_SAMPLE_RATE);
+    generator.generate(1.0f); // prefill which takes -gt 12ms for on_send_frames_to_device
+
+    lastTick = std::chrono::high_resolution_clock::now();
+    
+    mal_device_config config = mal_device_config_init_playback(DEVICE_FORMAT, DEVICE_CHANNELS, DEVICE_SAMPLE_RATE, on_send_frames_to_device);
+    mal_device device;
+    if (mal_device_init(NULL, mal_device_type_playback, NULL, &config, &generator, &device) != MAL_SUCCESS) {
+        printf("Failed to open playback device.\n");
+        return -4;
+    }
+
+    printf("Device Name: %s\n", device.name);
+
+    if (mal_device_start(&device) != MAL_SUCCESS) {
+        printf("Failed to start playback device.\n");
+        mal_device_uninit(&device);
+        return -5;
+    }
+    
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(main_loop__em, 0, 1);
+#else
+    printf("Press Enter to quit...\n");
+    getchar();
+#endif
+    
+    mal_device_uninit(&device);
+    return 0;
 }
 
 int main(int argc, char** argv)
@@ -97,6 +163,7 @@ int main(int argc, char** argv)
     po::variables_map vm;
 
 
+    /*
     auto devicesList = altoolset::openal::Device::listAudioDevices();
     if (devicesList.empty()) {
         std::cout << "Cannot found any audio device" << std::endl;
@@ -115,6 +182,7 @@ int main(int argc, char** argv)
         return 2;
     }
     ctx->setCurrent();
+    */
 
     try {
         po::parsed_options parsed = po::command_line_parser(argc, argv).options(desc).allow_unregistered().run();
@@ -124,10 +192,13 @@ int main(int argc, char** argv)
             // nop, just fallthrought
         }
         else if (vm.count("devices")) {
+            std::cout << "Device list is not supported" << std::endl;
+            /*
             std::cout << "Devices list:" << std::endl;
             for (auto device : devicesList) {
                 std::cout << "  " << device << std::endl;
             }
+            */
             return 0;
         }
         else if (runType == "sin") {
@@ -138,7 +209,10 @@ int main(int argc, char** argv)
                 std::cerr << desc << std::endl;
                 return 1;
             }
-            QueueSinPlay(device, genFrequency, std::chrono::seconds(20), ctx);
+            std::cout << "Sinusoidal generation is not supported yet" << std::endl;
+            auto res = QueueSinPlay(genFrequency, std::chrono::seconds(20));
+            std::cout << res << std::endl;
+            //QueueSinPlay(device, genFrequency, std::chrono::seconds(20), ctx);
             return 0;
         }
         else if (runType == "floatsin") {
@@ -149,13 +223,16 @@ int main(int argc, char** argv)
                 std::cerr << desc << std::endl;
                 return 1;
             }
-            float period = (float)genFloatFrequency.period;
-            std::cerr << "Period: " << period << std::endl;
-            QueueFloatingPlay(device, genFloatFrequency.leftFreq, genFloatFrequency.rightFreq,
-                              (ALfloat)period, std::chrono::seconds(60), ctx);
+            std::cout << "Floating sinusoidal generation is not supported yet" << std::endl;
+            auto res = QueueFloatingPlay(genFloatFrequency.leftFreq, genFloatFrequency.rightFreq,
+                              (float)genFloatFrequency.period, std::chrono::seconds(60));
+            std::cout << res << std::endl;
+            //QueueFloatingPlay(device, genFloatFrequency.leftFreq, genFloatFrequency.rightFreq,
+            //                  (ALfloat)period, std::chrono::seconds(60), ctx);
             return 0;
         }
         else if (runType == "wav" || runType == "file") {
+            /*
             desc.add(wavDesc);
             po::store(po::parse_command_line(argc, argv, desc), vm);
             po::notify(vm);
@@ -167,7 +244,9 @@ int main(int argc, char** argv)
             //filePath = vm["file"].as<std::string>();
             auto fp = boost::filesystem::absolute(boost::filesystem::path(filePath));
             std::cout << fp << std::endl;
-            WavPlay(ctx, 1, fp.c_str());
+            //WavPlay(ctx, 1, fp.c_str());
+            */
+            std::cout << "Wav player is not supported yet" << std::endl;
             return 0;
         }
     } catch(std::exception &e) {

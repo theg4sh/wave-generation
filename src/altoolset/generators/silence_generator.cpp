@@ -2,11 +2,12 @@
 
 namespace altoolset {
 
-void SilenceGenerator::generate()
+void SilenceGenerator::generate(float /*amplitude*/)
 {
-    auto size = this->getDataSize();
-    for (ALCint i=0; i<size; i++) {
-        this->buffer[i] = 0;
+    for (; this->buffer.current() != this->buffer.end(); this->buffer.next()) {
+        if (!this->bufferPush(0)) {
+            return;
+        }
     }
 }
 

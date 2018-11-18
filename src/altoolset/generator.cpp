@@ -18,17 +18,12 @@ ALCint Generator::getBufferMinValue() {
     return std::numeric_limits<short>::min();
 }
 
-const BufferDataType* Generator::getData() const {
-    return this->buffer.data();
-}
-
-ALsizei Generator::getDataSize() const {
+std::size_t Generator::getDataSize() {
     return this->buffer.size();
 }
 
 ALCint Generator::getDeviceRate() const {
     return this->deviceRate;
 }
-
 
 }

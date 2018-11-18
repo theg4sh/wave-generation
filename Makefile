@@ -9,7 +9,7 @@ MINIAL_PATH?=
 INCLUDES := -I./include
 LIBRARIES += -lpthread
 LIBRARIES += -lboost_system -lboost_program_options -lboost_filesystem
-CXX_FLAGS += -Wall -pedantic -std=c++14 -ggdb $(INCLUDES)
+CXX_FLAGS += -O2 -ffast-math -Wall -pedantic -std=c++14 -ggdb $(INCLUDES)
 CXX = g++ $(CXX_FLAGS)
 
 # src/altoolset files

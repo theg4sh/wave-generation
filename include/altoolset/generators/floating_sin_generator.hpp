@@ -17,10 +17,10 @@ namespace altoolset {
     protected:
         ALfloat startFreq, endFreq;
 
-        // The function how we move between startFreq and endFreq
+        /**
+         * @brief The function describes how we move between startFreq and endFreq
+         */
         Generator* frequencyWave;
-        //bool tmpPrintout;
-        //std::stringstream tmpOut;
 
     public:
         FloatingSinGenerator(ALfloat startFrequency,
@@ -40,8 +40,6 @@ namespace altoolset {
          * @brief getFrequiency overrides SinGenerator frequency variable
          */
         virtual ALdouble generateNextStep() override;
-
-        //~FloatingSinGenerator() = default;
     };
 
 }

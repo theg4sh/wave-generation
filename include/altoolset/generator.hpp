@@ -1,6 +1,7 @@
 #ifndef ALTOOLSET_GENERATOR_HPP
 #define ALTOOLSET_GENERATOR_HPP
 
+#include <iostream>
 #include <queue>
 #include <vector>
 #include <limits>
@@ -8,15 +9,15 @@
 #include <AL/al.h>
 #include <AL/alc.h>
 
-namespace altoolset {
+#include <altoolset/generator_buffer.hpp>
 
-    typedef short BufferDataType;
-    typedef std::vector<BufferDataType> BufferType;
+namespace altoolset {
 
     const ALdouble CIRCLE = M_PI * 2.0f;
 
     class Generator
     {
+    public:
     private:
         ALCint deviceRate;
     protected:
@@ -24,7 +25,7 @@ namespace altoolset {
          * @brief buffer have size equal to deviceRate value, which means
          * it contains wave for one second.
          */
-        BufferType buffer;
+        GeneratorBuffer buffer;
 
         ALCint getBufferMaxValue();
         ALCint getBufferMinValue();
@@ -39,10 +40,14 @@ namespace altoolset {
          */
         virtual ALfloat getFrequency() const = 0;
 
+        bool bufferPush(float value) {
+            return this->buffer.push(value);
+        }
+
     public:
         Generator(ALCint deviceRate):
-            deviceRate(deviceRate)
-        {}
+            deviceRate(deviceRate),
+            buffer(deviceRate) {}
 
         ~Generator() = default;
 
@@ -57,15 +62,43 @@ namespace altoolset {
          */
         virtual ALdouble generateNextStep() = 0;
 
-        const BufferDataType* getData() const;
         /**
          * @brief return size of data. Expected to be constant.
          */
-        ALsizei getDataSize() const;
+        std::size_t getDataSize();
 
         ALCint getDeviceRate() const;
 
-        virtual void generate() = 0;
+        /**
+         * @brief generate should check an getBuffersAvailable and
+         * if it -gt 0 then fill next buffer
+         */
+        virtual void generate(float amplitude) = 0;
+
+        /**
+         * @brief fillOutputBuffer will copy full or part of buffer
+         * and remember the last position
+         */
+        template<typename T>
+        void fillOutputBuffer(std::vector<T>& dest) {
+            std::size_t idst = 0;
+            do {
+                for (; this->buffer.current() != this->buffer.end()
+                       && idst < dest.size(); this->buffer.next(), idst++) {
+                    dest[idst] = static_cast<T>(*this->buffer.current());
+                }
+            } while(idst < dest.size() && this->buffer.current() != this->buffer.end());
+        }
+        template<typename T>
+        void fillOutputBuffer(T* dest, std::size_t destSize) {
+            std::size_t idst = 0;
+            do {
+                for (; this->buffer.current() != this->buffer.end()
+                       && idst < destSize; this->buffer.next(), idst++) {
+                    dest[idst] = static_cast<T>(*this->buffer.current());
+                }
+            } while(idst < destSize && this->buffer.current() != this->buffer.end());
+        }
     };
 
 }

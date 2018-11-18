@@ -20,7 +20,7 @@ namespace altoolset {
             Generator(deviceRate) {}
 
         virtual void init() override;
-        virtual void generate() override;
+        virtual void generate(float amplitude) override;
     };
 
 }

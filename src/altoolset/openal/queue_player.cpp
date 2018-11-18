@@ -1,10 +1,11 @@
 
 #include <iostream>
 #include <string.h>
-#include <AL/al.h>
-#include <AL/alext.h>
 #include <thread>
 #include <condition_variable>
+
+#include <AL/al.h>
+#include <AL/alext.h>
 
 #include "altoolset/generator.hpp"
 #include "altoolset/openal/queue_player.hpp"
@@ -48,17 +49,22 @@ void QueuePlayer::worker()
     // Generating
     ALint buffersAvailable = QueuePlayer::BUFFERS_COUNT;
     ALint buffersInQueue = 0;
-    const auto size = this->generator.getDataSize();
     for (;this->workerRunning;) {
         alGetSourcei(this->source, AL_BUFFERS_QUEUED, &buffersInQueue);
         if (buffersInQueue-buffersAvailable <= 1) {
             //std::cerr << "Fill - Buffers in queue: " << buffersInQueue-buffersAvailable << " Buffers available: " << buffersAvailable << " => ";
+            std::vector<short> data;
+            data.resize(this->generator.getDeviceRate());
             for (int it=0; it < buffersAvailable; it++)
             {
-                this->generator.generate();
-                //std::cerr << data[0] << " ... " << data[size-1] << std::endl;
+                const float amplitude = std::numeric_limits<short>::max()-1;
+                this->generator.generate(amplitude);
+
+                //const auto size = this->generator.getDataSize();
+                this->generator.fillOutputBuffer(data);
+                //std::cerr << "[" << data.size() << "] " << data[0] << " ... " << data[data.size()-1] << std::endl;
                 alBufferData(buffersHolder[it], AL_FORMAT_MONO16,
-                             this->generator.getData(), size,
+                             data.data(), data.size(),
                              this->generator.getDeviceRate());
                 //std::cerr << buffersHolder[it] << " ";
             }
