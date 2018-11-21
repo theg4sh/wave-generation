@@ -2,6 +2,7 @@
 #include <stack>
 #include <vector>
 #include <thread>
+#include <unordered_map>
 
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
@@ -16,8 +17,11 @@
 #define DEVICE_SAMPLE_RATE  44100
 
 //#include "altoolset/altoolset.hpp"
+#include "altoolset/sin.hpp"
+#include "altoolset/generator.hpp"
 #include "altoolset/generators/sin_generator.hpp"
 #include "altoolset/generators/floating_sin_generator.hpp"
+#include "altoolset/generators/composite_generator.hpp"
 
 namespace po=boost::program_options;
 
@@ -44,100 +48,140 @@ void WavPlay(std::shared_ptr<altoolset::openal::Context> ctx, size_t count, cons
 
 auto lastTick = std::chrono::high_resolution_clock::now();
 
-// This is the function that's used for sending more data to the device for playback.
-// NOTE: avg call each 12ms
 mal_uint32 on_send_frames_to_device(mal_device* pDevice, mal_uint32 frameCount, void* pSamples)
 {
     mal_assert(pDevice->channels == DEVICE_CHANNELS);
 
-    altoolset::Generator* pSineGen = static_cast<altoolset::Generator*>(pDevice->pUserData);
-    mal_assert(pSineGen != nullptr);
+    altoolset::Generator* pGen = static_cast<altoolset::Generator*>(pDevice->pUserData);
+    mal_assert(pGen != nullptr);
 
-    pSineGen->fillOutputBuffer(static_cast<float*>(pSamples), frameCount);
-    pSineGen->generate(1.0f);
+    pGen->fillOutputBuffer(static_cast<float*>(pSamples), frameCount);
+    pGen->generate();
 
-    return frameCount;
     // see original code in mal_uint64 mal_sine_wave_read_ex
     //return mal_sine_wave_read(pSineWave, frameCount, (float*)pSamples);
+    return frameCount;
+}
+
+// This is the function that's used for sending more data to the device for playback.
+// NOTE: avg call each 12ms
+
+int play_generator(altoolset::Generator* generator)
+{
+    assert(generator != nullptr);
+    lastTick = std::chrono::high_resolution_clock::now();
+    
+    // XXX: pass amplitude into on_send_frames_to_devices
+    mal_device_config config = mal_device_config_init_playback(
+                    DEVICE_FORMAT, DEVICE_CHANNELS, DEVICE_SAMPLE_RATE,
+                    on_send_frames_to_device);
+    mal_device device;
+    if (mal_device_init(NULL, mal_device_type_playback, NULL, &config, generator, &device) != MAL_SUCCESS) {
+        printf("Failed to open playback device.\n");
+        return -4;
+    }
+
+    printf("Device Name: %s\n", device.name);
+
+    if (mal_device_start(&device) != MAL_SUCCESS) {
+        printf("Failed to start playback device.\n");
+        mal_device_uninit(&device);
+        return -5;
+    }
+    
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(main_loop__em, 0, 1);
+#else
+    printf("Press Enter to quit...\n");
+    getchar();
+#endif
+    
+    mal_device_uninit(&device);
+    return 0;
 }
 
 int QueueSinPlay(ALCint frequency, std::chrono::milliseconds time)
 {
     altoolset::SinGenerator generator(frequency, DEVICE_SAMPLE_RATE);
     generator.init();
-    generator.generate(1.0f); // prefill which takes -gt 12ms for on_send_frames_to_device
+    generator.setAmplitude(1.0f);
+    generator.generate(); // prefill which takes -gt 12ms for on_send_frames_to_device
 
-    lastTick = std::chrono::high_resolution_clock::now();
-    
-    mal_device_config config = mal_device_config_init_playback(DEVICE_FORMAT, DEVICE_CHANNELS, DEVICE_SAMPLE_RATE, on_send_frames_to_device);
-    mal_device device;
-    if (mal_device_init(NULL, mal_device_type_playback, NULL, &config, &generator, &device) != MAL_SUCCESS) {
-        printf("Failed to open playback device.\n");
-        return -4;
-    }
-
-    printf("Device Name: %s\n", device.name);
-
-    if (mal_device_start(&device) != MAL_SUCCESS) {
-        printf("Failed to start playback device.\n");
-        mal_device_uninit(&device);
-        return -5;
-    }
-    
-#ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(main_loop__em, 0, 1);
-#else
-    printf("Press Enter to quit...\n");
-    getchar();
-#endif
-    
-    mal_device_uninit(&device);
-    return 0;
+    return play_generator(&generator);
 }
 
 int QueueFloatingPlay(ALCint freqMin, ALCint freqMax, ALfloat period, std::chrono::milliseconds time)
 {
-    altoolset::SinGenerator frequencyWave(period, DEVICE_SAMPLE_RATE);
-    frequencyWave.init();
-    altoolset::FloatingSinGenerator generator(freqMin, freqMax, &frequencyWave, DEVICE_SAMPLE_RATE);
-    generator.generate(1.0f); // prefill which takes -gt 12ms for on_send_frames_to_device
+    auto frequencyWave = std::make_shared<altoolset::SinGenerator>(period, DEVICE_SAMPLE_RATE);
+    //frequencyWave.init();
+    altoolset::FloatingSinGenerator generator(freqMin, freqMax, frequencyWave, DEVICE_SAMPLE_RATE);
+    generator.setAmplitude(1.0f);
+    generator.generate(); // prefill which takes -gt 12ms for on_send_frames_to_device
 
-    lastTick = std::chrono::high_resolution_clock::now();
-    
-    mal_device_config config = mal_device_config_init_playback(DEVICE_FORMAT, DEVICE_CHANNELS, DEVICE_SAMPLE_RATE, on_send_frames_to_device);
-    mal_device device;
-    if (mal_device_init(NULL, mal_device_type_playback, NULL, &config, &generator, &device) != MAL_SUCCESS) {
-        printf("Failed to open playback device.\n");
-        return -4;
+    return play_generator(&generator);
+}
+
+std::shared_ptr<altoolset::CompositeGenerator> makeLetterCompositeGenerator(float baseFrequency, float baseAmplitude,
+                                                           std::vector<std::pair<float /*frequency*/, float /*amplitude*/>> overtones)
+{
+    auto frequencyWave = std::make_shared<altoolset::SinGenerator>(0.25f, DEVICE_SAMPLE_RATE);
+    auto baseGen = std::make_shared<altoolset::FloatingSinGenerator>(baseFrequency, baseFrequency+25.0f, frequencyWave, DEVICE_SAMPLE_RATE);
+    auto generator = std::make_shared<altoolset::CompositeGenerator>(DEVICE_SAMPLE_RATE);
+    generator->init();
+    generator->push(baseGen, baseAmplitude);
+    for (auto& freqAmp : overtones) {
+        auto formanta = std::make_shared<altoolset::SinGenerator>(freqAmp.first, DEVICE_SAMPLE_RATE);
+        generator->push(formanta, freqAmp.second);
     }
+    float amp = 1.0f/(1.0f + static_cast<float>(overtones.size()));
+    generator->setAmplitude(amp);
+    generator->generate(); // prefill which takes -gt 12ms for on_send_frames_to_device
+    return generator;
+}
+int QueueCompositePlay(ALCint /*frequency*/, std::chrono::milliseconds /*time*/)
+{
+    /**
+                Частота речевых формант
+      Гласные   1-я форманта 2-я форманта 3-я форманта
 
-    printf("Device Name: %s\n", device.name);
+            У   300 625 2500
+            О   535 780 2500
+            А   700 1080 2600
+            Е   440 1800 2550
+            И   240 2250 3200
+            Ы   300 1480 2230
+    */
 
-    if (mal_device_start(&device) != MAL_SUCCESS) {
-        printf("Failed to start playback device.\n");
-        mal_device_uninit(&device);
-        return -5;
-    }
-    
-#ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(main_loop__em, 0, 1);
-#else
-    printf("Press Enter to quit...\n");
-    getchar();
-#endif
-    
-    mal_device_uninit(&device);
-    return 0;
+    std::unordered_map<std::string, std::shared_ptr<altoolset::CompositeGenerator>> lettersMap;
+    //      У   300  625  2500
+    //altoolset::SinGenerator frm1(300*k, DEVICE_SAMPLE_RATE), frm2(625*k, DEVICE_SAMPLE_RATE), frm3(2500*k, DEVICE_SAMPLE_RATE);
+    lettersMap.emplace("У", makeLetterCompositeGenerator(375.0f, 0.650f, {{300.0f, 0.250f}, {625.0f, 0.025f}, {2500.0f, 0.003f}}));
+    //      О   535  780  2500
+    //altoolset::SinGenerator frm1(535*k, DEVICE_SAMPLE_RATE), frm2(780*k, DEVICE_SAMPLE_RATE), frm3(2500*k, DEVICE_SAMPLE_RATE);
+    //      А   700  1080  2600
+    //altoolset::SinGenerator frm1(700.0*k, DEVICE_SAMPLE_RATE), frm2(1080.0f*k, DEVICE_SAMPLE_RATE), frm3(2600.0f*k, DEVICE_SAMPLE_RATE);
+    //      Е   440  1800  2550
+    //altoolset::SinGenerator frm1(440*k, DEVICE_SAMPLE_RATE), frm2(1800*k, DEVICE_SAMPLE_RATE), frm3(2550*k, DEVICE_SAMPLE_RATE);
+    //      И   240  2250  3200
+    //altoolset::SinGenerator frm1(240*k, DEVICE_SAMPLE_RATE), frm2(2250*k, DEVICE_SAMPLE_RATE), frm3(3200*k, DEVICE_SAMPLE_RATE);
+    //      Ы   300  1480  2230
+    //altoolset::SinGenerator frm1(300*k, DEVICE_SAMPLE_RATE), frm2(1480*k, DEVICE_SAMPLE_RATE), frm3(2230*k, DEVICE_SAMPLE_RATE);
+
+    //auto generator = lettersMap["У"];
+    auto& gen = lettersMap["У"];
+    return play_generator(&*gen);
 }
 
 int main(int argc, char** argv)
 {
+    altoolset::initSinPrecalc();
+
     po::options_description desc("General options");
     std::string runType;
     desc.add_options()
         ("help,h", "Print this text")
         ("devices", "List of available devices")
-        ("type,t", po::value(&runType), "Command type: wav|file, sin, floatsin");
+        ("type,t", po::value(&runType), "Command type: wav|file, sin, floatsin, composite");
 
     std::string filePath;
     po::options_description wavDesc("Play wav file");
@@ -205,31 +249,14 @@ int main(int argc, char** argv)
             desc.add(sinDesc);
             po::store(po::parse_command_line(argc, argv, desc), vm);
             po::notify(vm);
-            if (!vm.count("freq")) {
-                std::cerr << desc << std::endl;
-                return 1;
-            }
-            std::cout << "Sinusoidal generation is not supported yet" << std::endl;
-            auto res = QueueSinPlay(genFrequency, std::chrono::seconds(20));
-            std::cout << res << std::endl;
-            //QueueSinPlay(device, genFrequency, std::chrono::seconds(20), ctx);
-            return 0;
         }
         else if (runType == "floatsin") {
             desc.add(floatSinDesc);
             po::store(po::parse_command_line(argc, argv, desc), vm);
             po::notify(vm);
-            if (!vm.count("leftfreq") || !vm.count("rightfreq") || !vm.count("period")) {
-                std::cerr << desc << std::endl;
-                return 1;
-            }
-            std::cout << "Floating sinusoidal generation is not supported yet" << std::endl;
-            auto res = QueueFloatingPlay(genFloatFrequency.leftFreq, genFloatFrequency.rightFreq,
-                              (float)genFloatFrequency.period, std::chrono::seconds(60));
-            std::cout << res << std::endl;
-            //QueueFloatingPlay(device, genFloatFrequency.leftFreq, genFloatFrequency.rightFreq,
-            //                  (ALfloat)period, std::chrono::seconds(60), ctx);
-            return 0;
+        }
+        else if (runType == "composite") {
+            // no additional arguments
         }
         else if (runType == "wav" || runType == "file") {
             /*
@@ -252,6 +279,35 @@ int main(int argc, char** argv)
     } catch(std::exception &e) {
         // nop
         std::cerr << e.what() << std::endl;
+    }
+
+    if (vm.count("help")) {
+        // nop, just fallthrought
+    }
+    else if (runType == "sin") {
+        if (!vm.count("freq")) {
+            std::cerr << desc << std::endl;
+            return 1;
+        }
+        auto res = QueueSinPlay(genFrequency, std::chrono::seconds(20));
+        std::cout << res << std::endl;
+        return 0;
+    }
+    else if (runType == "floatsin") {
+        if (!vm.count("leftfreq") || !vm.count("rightfreq") || !vm.count("period")) {
+            std::cerr << desc << std::endl;
+            return 1;
+        }
+        std::cout << "Floating sinusoidal generation is not supported yet" << std::endl;
+        auto res = QueueFloatingPlay(genFloatFrequency.leftFreq, genFloatFrequency.rightFreq,
+                          (float)genFloatFrequency.period, std::chrono::seconds(60));
+        std::cout << res << std::endl;
+        return 0;
+    }
+    else if (runType == "composite") {
+        auto res = QueueCompositePlay(genFrequency, std::chrono::seconds(20));
+        std::cout << res << std::endl;
+        return 0;
     }
     //desc.add(wavDesc).add(sinDesc).add(floatSinDesc);
     std::cout << desc << std::endl;

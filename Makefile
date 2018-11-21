@@ -6,19 +6,20 @@ OPENAL_PATH?=
 USE_MINIAL?=
 MINIAL_PATH?=
 
-INCLUDES := -I./include
+CXX_INCLUDE_PATH := -I./include
 LIBRARIES += -lpthread
 LIBRARIES += -lboost_system -lboost_program_options -lboost_filesystem
-CXX_FLAGS += -O2 -ffast-math -Wall -pedantic -std=c++14 -ggdb $(INCLUDES)
-CXX = g++ $(CXX_FLAGS)
 
 # src/altoolset files
 SOURCES := $(addprefix src/altoolset/, \
+			sin.o \
 			generator.o \
 			generator_buffer.o \
 			generators/silence_generator.o \
 			generators/sin_generator.o \
-			generators/floating_sin_generator.o)
+			generators/floating_sin_generator.o \
+			generators/composite_generator.o \
+			)
 
 TESTS := $(addprefix tests/, \
 			test_generator_buffer.o)
@@ -33,7 +34,14 @@ ifneq ($(USE_MINIAL),)
 include mk/mini_al.mk
 endif
 
+
+
+CXX_FLAGS += -O2 -ffast-math -Wall -pedantic -std=c++14 -ggdb $(CXX_INCLUDE_PATH)
+CXX = g++ $(CXX_FLAGS)
+
 .PHONY=show-sources all clean test
+
+
 
 all: $(TARGETS)
 

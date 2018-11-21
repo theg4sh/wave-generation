@@ -17,7 +17,6 @@ namespace altoolset {
 
     class Generator
     {
-    public:
     private:
         ALCint deviceRate;
     protected:
@@ -26,6 +25,7 @@ namespace altoolset {
          * it contains wave for one second.
          */
         GeneratorBuffer buffer;
+        float amplitude;
 
         ALCint getBufferMaxValue();
         ALCint getBufferMinValue();
@@ -49,18 +49,12 @@ namespace altoolset {
             deviceRate(deviceRate),
             buffer(deviceRate) {}
 
-        ~Generator() = default;
+        virtual ~Generator() = default;
 
         /**
          * @brief Initialize container
          */
         virtual void init();
-
-        /**
-         * @brief generateNextStep
-         * TODO: rename that method
-         */
-        virtual ALdouble generateNextStep() = 0;
 
         /**
          * @brief return size of data. Expected to be constant.
@@ -69,15 +63,23 @@ namespace altoolset {
 
         ALCint getDeviceRate() const;
 
+        void setAmplitude(float amplitude);
+
+        /**
+         * @brief generateNextStep
+         * TODO: rename that method
+         */
+        virtual ALdouble generateNextStep() = 0;
+
         /**
          * @brief generate should check an getBuffersAvailable and
          * if it -gt 0 then fill next buffer
          */
-        virtual void generate(float amplitude) = 0;
+        virtual void generate() = 0;
 
         /**
          * @brief fillOutputBuffer will copy full or part of buffer
-         * and remember the last position
+         * and store the last read position
          */
         template<typename T>
         void fillOutputBuffer(std::vector<T>& dest) {

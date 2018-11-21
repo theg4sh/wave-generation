@@ -16,6 +16,9 @@ bool QueuePlayer::init()
 {
     alGenSources(1, &this->source);
     alGenBuffers(QueuePlayer::BUFFERS_COUNT, this->buffers);
+    // Specific to implementation with short-valued buffer
+    const float amplitude = std::numeric_limits<short>::max()-1;
+    this->generator.setAmplitude(amplitude);
     return true;
 }
 
@@ -57,8 +60,7 @@ void QueuePlayer::worker()
             data.resize(this->generator.getDeviceRate());
             for (int it=0; it < buffersAvailable; it++)
             {
-                const float amplitude = std::numeric_limits<short>::max()-1;
-                this->generator.generate(amplitude);
+                this->generator.generate();
 
                 //const auto size = this->generator.getDataSize();
                 this->generator.fillOutputBuffer(data);

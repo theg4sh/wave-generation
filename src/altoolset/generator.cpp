@@ -10,6 +10,11 @@ void Generator::init()
     this->buffer.resize(this->deviceRate);
 }
 
+void Generator::setAmplitude(float _amplitude)
+{
+    this->amplitude = _amplitude;
+}
+
 ALCint Generator::getBufferMaxValue() {
     return std::numeric_limits<short>::max();
 }

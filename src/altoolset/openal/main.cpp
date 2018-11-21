@@ -11,6 +11,7 @@
 
 #include "altoolset/openal/context.hpp"
 #include "altoolset/openal/device.hpp"
+#include "altoolset/sin.hpp"
 #include "altoolset/generators/sin_generator.hpp"
 #include "altoolset/generators/floating_sin_generator.hpp"
 
@@ -39,11 +40,11 @@ void QueueFloatingPlay(altoolset::openal::Device& dev, ALCint freqMin, ALCint fr
 {
     const auto deviceRate = dev.getDeviceRate();
     std::cout << "Creating frequency wave..." << std::endl;
-    altoolset::SinGenerator frequencyWave(period, deviceRate);
-    frequencyWave.init();
+    auto frequencyWave = std::make_shared<altoolset::SinGenerator>(period, deviceRate);
+    //frequencyWave.init();
 
     std::cout << "Creating floating sin generator " << freqMin << "<->" << freqMax << " ..." << std::endl;
-    altoolset::FloatingSinGenerator generator(freqMin, freqMax, &frequencyWave, deviceRate);
+    altoolset::FloatingSinGenerator generator(freqMin, freqMax, frequencyWave, deviceRate);
     generator.init();
     std::cout << "Creating queue player..." << std::endl;
     auto player = ctx->createQueuePlayer(generator);
@@ -66,6 +67,8 @@ void QueueSinPlay(altoolset::openal::Device& dev, ALCint frequency, std::chrono:
 
 int main(int argc, char** argv)
 {
+    altoolset::initSinPrecalc();
+
     po::options_description desc("General options");
     std::string runType;
     desc.add_options()
