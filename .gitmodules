@@ -1,0 +1,3 @@
+[submodule "thirdparty/mini_al"]
+	path = thirdparty/mini_al
+	url = https://github.com/dr-soft/mini_al.git
